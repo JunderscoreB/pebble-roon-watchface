@@ -1,0 +1,74 @@
+{
+  "name": "roon-watchface",
+  "author": "J_B",
+  "version": "1.0.0",
+  "private": true,
+  "pebble": {
+    "uuid": "c87c8d5c-d657-47f7-a2a1-aa19e8878cc6",
+    "projectType": "native",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "capabilities": [
+      "configurable"
+    ],
+    "displayName": "Roon Face",
+    "companyName": "J_B",
+    "versionLabel": "1.0",
+    "targetPlatforms": [
+      "gabbro",
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": {
+      "command": 0,
+      "zone_name": 1,
+      "track": 2,
+      "artist": 3,
+      "is_playing": 4,
+      "volume_val": 5,
+      "is_fixed": 6,
+      "error": 7,
+      "font_size": 8,
+      "scroll_text": 9,
+      "timeout_app": 10,
+      "timeout_disc": 11,
+      "enable_touch": 12,
+      "is_configuring": 13,
+      "bridge_ip": 14,
+      "bridge_port": 15,
+      "respect_quiet_time": 16,
+      "theme": 17
+    },
+"resources": {
+      "media": [
+        {
+          "type": "png",
+          "name": "MENU_ICON",
+          "file": "menu_icon.png",
+          "menuIcon": true
+        },
+        {
+          "type": "png",
+          "name": "ROON_LOGO_TINY_DARK",
+          "file": "roon_logo_tiny-dark.png"
+        },
+        {
+          "type": "png",
+          "name": "ROON_LOGO_TINY_LIGHT",
+          "file": "roon_logo_tiny-light.png"
+        },
+        {
+          "type": "font",
+          "name": "YARO_BOLD_42",
+          "file": "vladb-yarorg-bold.ttf",
+          "characterRegex": "[0-9:amp ]"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@rebble/clay": "^1.1.0"
+  }
+}
