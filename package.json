@@ -1,7 +1,7 @@
 {
   "name": "roon-watchface",
   "author": "J_B",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "pebble": {
     "uuid": "c87c8d5c-d657-47f7-a2a1-aa19e8878cc6",
@@ -41,7 +41,7 @@
       "respect_quiet_time": 16,
       "theme": 17
     },
-"resources": {
+    "resources": {
       "media": [
         {
           "type": "png",
@@ -61,8 +61,8 @@
         },
         {
           "type": "font",
-          "name": "YARO_BOLD_42",
-          "file": "vladb-yarorg-bold.ttf",
+          "name": "COMFORTAA_BOLD_42",
+          "file": "Comfortaa-Bold.ttf",
           "characterRegex": "[0-9:amp ]"
         }
       ]

@@ -9,7 +9,7 @@
  */
 
 #include <pebble.h>
-#include <stdlib.h> 
+#include <stdlib.h>
 
 #define KEY_COMMAND 0
 #define KEY_ZONE_NAME 1
@@ -35,7 +35,7 @@
 
 // Timing configurations
 #define GLOW_FRAME_INTERVAL_MS 60
-#define GESTURE_MODE_TIMEOUT_MS 5000 
+#define GESTURE_MODE_TIMEOUT_MS 5000
 #define VOLUME_MODE_TIMEOUT_MS 5000
 
 // Scale dynamically for Gabbro (260x260), Chalk (180x180), Emery (200x228), and Rect (144x168)
@@ -65,6 +65,7 @@ static bool s_respect_quiet_time = true;
 static bool s_light_mode = false;
 
 static TextLayer *s_time_layer = NULL;
+static TextLayer *s_date_layer = NULL;
 static BitmapLayer *s_logo_layer = NULL;
 static GBitmap *s_logo_bitmap = NULL;
 static TextLayer *s_track_layer = NULL;
@@ -138,6 +139,7 @@ static const GColor GLOW_PALETTE[][2] = {
 #define GLOW_PALETTE_STEPS (sizeof(GLOW_PALETTE) / sizeof(GLOW_PALETTE[0]))
 
 static char s_time_buf[16] = "";
+static char s_date_buf[64] = "";
 static char s_track_buf[128] = "";
 static char s_artist_buf[128] = "";
 static char s_zone_buf[64] = "";
@@ -175,6 +177,7 @@ static void apply_theme() {
 
   window_set_background_color(s_window, bg_color);
   text_layer_set_text_color(s_time_layer, fg_color);
+  if (s_date_layer) text_layer_set_text_color(s_date_layer, fg_color);
   text_layer_set_text_color(s_track_layer, fg_color);
   text_layer_set_text_color(s_artist_layer, fg_color);
 
@@ -182,18 +185,18 @@ static void apply_theme() {
     gbitmap_destroy(s_logo_bitmap);
     s_logo_bitmap = NULL;
   }
-  
+
   s_logo_bitmap = gbitmap_create_with_resource(s_light_mode ? RESOURCE_ID_ROON_LOGO_TINY_LIGHT : RESOURCE_ID_ROON_LOGO_TINY_DARK);
   if (s_logo_layer && s_logo_bitmap) {
     bitmap_layer_set_bitmap(s_logo_layer, s_logo_bitmap);
   }
 
-#if ENABLE_VOLUME
+  #if ENABLE_VOLUME
   if (s_vol_layer) {
     text_layer_set_background_color(s_vol_layer, bg_color);
     text_layer_set_text_color(s_vol_layer, fg_color);
   }
-#endif
+  #endif
 
   if (s_zone_layer) layer_mark_dirty(s_zone_layer);
   if (s_status_layer) layer_mark_dirty(s_status_layer);
@@ -267,7 +270,7 @@ static void lock_volume_updates(void) {
 static void vol_flash_cb(void *data) {
   s_is_flashing_vol = false;
   s_vol_flash_timer = NULL;
-  
+
   end_gesture_mode_cb(NULL);
   update_ui();
 }
@@ -278,15 +281,15 @@ static void flash_volume_ms(int ms) {
     app_timer_cancel(s_vol_flash_timer);
     s_vol_flash_timer = NULL;
   }
-  
+
   if (!s_is_touching) {
     s_vol_flash_timer = app_timer_register(ms, vol_flash_cb, NULL);
   }
-  
+
   if (s_gesture_mode_active && !s_is_touching) {
     extend_gesture_mode();
   }
-  
+
   update_ui();
 }
 #endif
@@ -319,7 +322,7 @@ static void apply_fonts() {
     s_zone_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
     s_play_path = gpath_create(&s_small_play_info);
   }
-  
+
   if (s_zone_layer) layer_mark_dirty(s_zone_layer);
 }
 
@@ -339,10 +342,10 @@ static void stop_marquee() {
   if (s_track_layer && s_window_loaded) {
     Layer *root = window_get_root_layer(s_window);
     GRect bounds = layer_get_bounds(root);
-    
+
     layer_set_frame(text_layer_get_layer(s_track_layer), GRect(0, (bounds.size.h / 2) + NATIVE_Y(12, 14), bounds.size.w, NATIVE_H(32, 32)));
     text_layer_set_text_alignment(s_track_layer, GTextAlignmentCenter);
-    
+
     layer_set_frame(text_layer_get_layer(s_artist_layer), GRect(0, (bounds.size.h / 2) + NATIVE_Y(36, 40), bounds.size.w, NATIVE_H(28, 28)));
     text_layer_set_text_alignment(s_artist_layer, GTextAlignmentCenter);
   }
@@ -350,7 +353,13 @@ static void stop_marquee() {
 
 static void start_marquee() {
   stop_marquee();
-  if (!s_enable_scroll || !s_window_loaded || !s_track_layer || !s_artist_layer || !s_is_playing) return;
+  if (!s_window_loaded || !s_track_layer || !s_artist_layer) return;
+
+  bool is_no_core = (strcmp(s_track_buf, "No Core") == 0);
+  // Force marquee for "No Core" prompt even if scroll is disabled in settings
+  if (!is_no_core) {
+    if (!s_enable_scroll || !s_is_playing) return;
+  }
 
   const char* track_text = text_layer_get_text(s_track_layer);
   const char* artist_text = text_layer_get_text(s_artist_layer);
@@ -431,41 +440,53 @@ static void update_ui() {
   Layer *root = window_get_root_layer(s_window);
   GRect bounds = layer_get_bounds(root);
 
-  bool hide_music = (s_mode == MODE_ERROR) || (s_respect_quiet_time && quiet_time_is_active());
+  bool is_error_resting = (s_mode == MODE_ERROR && !s_gesture_mode_active);
+  bool is_quiet = (s_respect_quiet_time && quiet_time_is_active());
+  bool hide_music = is_error_resting || is_quiet;
 
   if (hide_music) {
     stop_marquee();
-    
+
     layer_set_hidden(text_layer_get_layer(s_track_layer), true);
     layer_set_hidden(text_layer_get_layer(s_artist_layer), true);
     layer_set_hidden(s_zone_layer, true);
-    
+
     if (s_status_layer) layer_set_hidden(s_status_layer, true);
+    layer_set_hidden(text_layer_get_layer(s_date_layer), false);
 
     int time_h = NATIVE_H(42, 42);
-    int offset_y = (bounds.size.h - time_h) / 2;
+    int date_h = (bounds.size.w < 180) ? 36 : 18;
+    int total_h = time_h + date_h;
+    int offset_y = (bounds.size.h - total_h) / 2;
 
     layer_set_frame(bitmap_layer_get_layer(s_logo_layer), GRect(0, NATIVE_Y(4, 10), bounds.size.w, NATIVE_H(20, 20)));
-    layer_set_frame(text_layer_get_layer(s_time_layer), GRect(0, offset_y, bounds.size.w, time_h));
+    layer_set_frame(text_layer_get_layer(s_time_layer), GRect(0, offset_y - 6, bounds.size.w, time_h));
+    layer_set_frame(text_layer_get_layer(s_date_layer), GRect(0, offset_y + time_h - 10, bounds.size.w, date_h));
   } else {
+    layer_set_hidden(text_layer_get_layer(s_date_layer), true);
+
     layer_set_hidden(text_layer_get_layer(s_track_layer), false);
     layer_set_hidden(text_layer_get_layer(s_artist_layer), false);
-    layer_set_hidden(s_zone_layer, false);
+    layer_set_hidden(s_zone_layer, (s_mode == MODE_ERROR));
     if (s_status_layer) {
       layer_set_hidden(s_status_layer, false);
       layer_mark_dirty(s_status_layer);
     }
-    
+
     layer_set_frame(bitmap_layer_get_layer(s_logo_layer), GRect(0, NATIVE_Y(4, 10), bounds.size.w, NATIVE_H(20, 20)));
     layer_set_frame(text_layer_get_layer(s_time_layer), GRect(0, NATIVE_Y(24, 30), bounds.size.w, NATIVE_H(42, 42)));
   }
 
-  safe_set_text(s_track_layer, s_track_buf);
-
-  if (strcmp(s_track_buf, "No Core") == 0) {
-    safe_set_text(s_artist_layer, "Is the extension enabled?");
+  if (s_mode == MODE_ERROR) {
+    safe_set_text(s_track_layer, "Bridge Not Found");
+    safe_set_text(s_artist_layer, "Tap to retry");
   } else {
-    safe_set_text(s_artist_layer, s_artist_buf);
+    safe_set_text(s_track_layer, s_track_buf);
+    if (strcmp(s_track_buf, "No Core") == 0) {
+      safe_set_text(s_artist_layer, "Is the extension enabled?");
+    } else {
+      safe_set_text(s_artist_layer, s_artist_buf);
+    }
   }
 
   layer_mark_dirty(s_zone_layer);
@@ -532,25 +553,25 @@ static void trigger_optimistic_playpause() {
 
 // --- VISUAL GLOW AND TOUCH FEEDBACK ---
 static void glow_layer_update_proc(Layer *layer, GContext *ctx) {
-  if (!s_gesture_mode_active && !s_is_touching) return; 
+  if (!s_gesture_mode_active && !s_is_touching) return;
 
   GRect bounds = layer_get_bounds(layer);
   GColor fallback_color = s_light_mode ? GColorBlack : GColorWhite;
   (void)fallback_color; // Explicitly suppress unused variable warning on color platforms
-  
+
   GColor outer_color = COLOR_FALLBACK(GLOW_PALETTE[s_glow_step][0], fallback_color);
   GColor inner_color = COLOR_FALLBACK(GLOW_PALETTE[s_glow_step][1], fallback_color);
 
   graphics_context_set_stroke_width(ctx, 1);
 
-#if PBL_ROUND
+  #if PBL_ROUND
   GPoint center = grect_center_point(&bounds);
   uint16_t radius = (bounds.size.w / 2) - 3;
   graphics_context_set_stroke_color(ctx, outer_color);
   graphics_draw_circle(ctx, center, radius);
   graphics_context_set_stroke_color(ctx, inner_color);
   graphics_draw_circle(ctx, center, radius - 1);
-#else
+  #else
   GRect glow_bounds = grect_inset(bounds, GEdgeInsets(2));
   graphics_context_set_stroke_color(ctx, outer_color);
   graphics_draw_round_rect(ctx, glow_bounds, 4);
@@ -558,7 +579,7 @@ static void glow_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect inner_bounds = grect_inset(glow_bounds, GEdgeInsets(1));
   graphics_context_set_stroke_color(ctx, inner_color);
   graphics_draw_round_rect(ctx, inner_bounds, 3);
-#endif
+  #endif
 }
 
 static void glow_pulse_timer_cb(void *data) {
@@ -577,18 +598,17 @@ static void end_gesture_mode_cb(void *data) {
   s_gesture_mode_timer = NULL;
   s_gesture_mode_active = false;
   s_is_touching = false;
-  
-  // Power down the touch digitizer hardware when the 5-second gesture times out.[cite: 1]
+
   if (touch_service_is_enabled()) {
     touch_service_unsubscribe();
   }
-  
+
   layer_set_hidden(s_glow_layer, true);
   if (s_glow_pulse_timer) {
     app_timer_cancel(s_glow_pulse_timer);
     s_glow_pulse_timer = NULL;
   }
-  
+
   update_ui();
 }
 
@@ -609,7 +629,6 @@ static void enter_gesture_mode(void) {
     s_gesture_mode_active = true;
     vibes_short_pulse();
 
-    // Dynamically power up the capacitive touch screen only when gesture mode activates.[cite: 1]
     if (s_enable_touch && touch_service_is_enabled()) {
       touch_service_subscribe(touch_handler, NULL);
     }
@@ -618,11 +637,11 @@ static void enter_gesture_mode(void) {
       layer_set_hidden(s_glow_layer, false);
       layer_mark_dirty(s_glow_layer);
     }
-    
+
     if (!s_glow_pulse_timer) {
       s_glow_pulse_timer = app_timer_register(GLOW_FRAME_INTERVAL_MS, glow_pulse_timer_cb, NULL);
     }
-    update_ui(); 
+    update_ui();
   }
   extend_gesture_mode();
 }
@@ -657,14 +676,14 @@ static void touch_handler(const TouchEvent *event, void *context) {
 
   if (event->type == TouchEvent_Touchdown) {
     light_enable_interaction();
-    
+
     s_is_touching = true;
     s_touch_start_x = event->x;
     s_touch_start_y = event->y;
     s_touch_current_x = event->x;
     s_touch_current_y = event->y;
     s_last_vol_y = event->y;
-    
+
     s_touch_held = false;
     s_volume_mode_ready = false;
     s_volume_mode_active = false;
@@ -699,11 +718,11 @@ static void touch_handler(const TouchEvent *event, void *context) {
       if (step_dy <= -10 || step_dy >= 10) {
         #if ENABLE_VOLUME
         if (!s_is_fixed) {
-          if (step_dy <= -10) { 
+          if (step_dy <= -10) {
             if (s_volume != -1) { s_volume += 2; if (s_volume > 100) s_volume = 100; }
             send_command("vol_up");
             lock_volume_updates();
-          } else {              
+          } else {
             if (s_volume != -1) { s_volume -= 2; if (s_volume < 0) s_volume = 0; }
             send_command("vol_down");
             lock_volume_updates();
@@ -730,7 +749,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
       s_volume_mode_active = false;
       s_touch_start_x = -1;
       s_touch_start_y = -1;
-      
+
       if (s_gesture_mode_active) {
         extend_gesture_mode();
         if (s_is_flashing_vol && !s_vol_flash_timer) {
@@ -760,13 +779,13 @@ static void touch_handler(const TouchEvent *event, void *context) {
           }
           flash_volume_ms(3000);
         }
-      } 
+      }
       else if (abs_dx > 30 && abs_dx > abs_dy) {
         if (s_mode == MODE_TRACK) {
           vibes_short_pulse();
           send_command(delta_x > 0 ? "previous" : "next");
         }
-      } 
+      }
       else if (abs_dy > 20 && abs_dy > abs_dx) {
         vibes_short_pulse();
         reset_zone_timer();
@@ -789,7 +808,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
 
     s_touch_start_x = -1;
     s_touch_start_y = -1;
-    
+
     if (s_gesture_mode_active) {
       extend_gesture_mode();
       if (s_is_flashing_vol && !s_vol_flash_timer) {
@@ -816,24 +835,24 @@ static void zone_layer_update_proc(Layer *layer, GContext *ctx) {
   if (!s_window_loaded || s_mode == MODE_ERROR) return;
 
   GRect bounds = layer_get_bounds(layer);
-  
-  if (!s_zone_font) return; 
+
+  if (!s_zone_font) return;
   if (strlen(s_zone_buf) == 0) return;
-  
+
   GSize text_size = graphics_text_layout_get_content_size(s_zone_buf, s_zone_font, GRect(0, 0, bounds.size.w - 12, bounds.size.h), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
-  
+
   int padding_x = 6;
-  int padding_y_total = 4; 
-  
+  int padding_y_total = 4;
+
   int box_width = text_size.w + (padding_x * 2);
   if (box_width > bounds.size.w) box_width = bounds.size.w;
-  
+
   int box_height = text_size.h + padding_y_total;
   if (box_height > bounds.size.h) box_height = bounds.size.h;
-  
+
   int box_x = (bounds.size.w - box_width) / 2;
   int box_y = (bounds.size.h - box_height) / 2;
-  
+
   GRect box_rect = GRect(box_x, box_y, box_width, box_height);
   GRect text_rect = GRect(box_x + padding_x, box_y - 2, text_size.w, box_height + 4);
 
@@ -850,14 +869,14 @@ static void zone_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_round_rect(ctx, box_rect, 3);
     graphics_context_set_text_color(ctx, fg_color);
   }
-  
+
   graphics_draw_text(ctx, s_zone_buf, s_zone_font, text_rect, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 }
 
 static void status_layer_update_proc(Layer *layer, GContext *ctx) {
   if (!s_window_loaded || s_mode == MODE_ERROR) return;
   GRect bounds = layer_get_bounds(layer);
-  
+
   GColor fg_color = s_light_mode ? GColorBlack : GColorWhite;
 
   if (s_mode == MODE_TRACK) {
@@ -1048,10 +1067,16 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
     int start_idx = (temp_buf[0] == '0') ? 1 : 0;
     snprintf(s_time_buf, sizeof(s_time_buf), "%s %s", &temp_buf[start_idx], tick_time->tm_hour < 12 ? "am" : "pm");
   }
+
   if (s_time_layer) {
     text_layer_set_text(s_time_layer, s_time_buf);
   }
-  
+
+  strftime(s_date_buf, sizeof(s_date_buf), "%a, %b %d", tick_time);
+  if (s_date_layer) {
+    text_layer_set_text(s_date_layer, s_date_buf);
+  }
+
   manage_hardware_subscriptions();
   update_ui();
 }
@@ -1068,10 +1093,17 @@ static void window_load(Window *window) {
 
   s_time_layer = text_layer_create(GRect(0, NATIVE_Y(24, 30), bounds.size.w, NATIVE_H(42, 42)));
   text_layer_set_background_color(s_time_layer, GColorClear);
-  s_time_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_YARO_BOLD_42));
+  s_time_font = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_COMFORTAA_BOLD_42));
   text_layer_set_font(s_time_layer, s_time_font);
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_time_layer));
+
+  s_date_layer = text_layer_create(GRect(0, 0, bounds.size.w, 18));
+  text_layer_set_background_color(s_date_layer, GColorClear);
+  text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
+  layer_set_hidden(text_layer_get_layer(s_date_layer), true);
+  layer_add_child(root, text_layer_get_layer(s_date_layer));
 
   s_status_layer = layer_create(GRect(0, (bounds.size.h / 2) - 16, bounds.size.w, 32));
   layer_set_update_proc(s_status_layer, status_layer_update_proc);
@@ -1111,7 +1143,7 @@ static void window_load(Window *window) {
   apply_fonts();
   s_window_loaded = true;
   apply_theme();
-  
+
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   tick_handler(t, MINUTE_UNIT);
@@ -1140,12 +1172,13 @@ static void window_unload(Window *window) {
 
   layer_destroy(s_glow_layer);
   text_layer_destroy(s_time_layer);
+  text_layer_destroy(s_date_layer);
   text_layer_destroy(s_track_layer);
   text_layer_destroy(s_artist_layer);
   layer_destroy(s_zone_layer);
   layer_destroy(s_status_layer);
   bitmap_layer_destroy(s_logo_layer);
-  
+
   if (s_time_font) {
     fonts_unload_custom_font(s_time_font);
   }
@@ -1160,7 +1193,7 @@ static void init(void) {
   if (persist_exists(PERSIST_KEY_TOUCH)) s_enable_touch = persist_read_bool(PERSIST_KEY_TOUCH);
   if (persist_exists(PERSIST_KEY_QUIET_TIME)) s_respect_quiet_time = persist_read_bool(PERSIST_KEY_QUIET_TIME);
   if (persist_exists(PERSIST_KEY_THEME)) s_light_mode = persist_read_bool(PERSIST_KEY_THEME);
-  
+
   s_window = window_create();
 
   app_focus_service_subscribe_handlers((AppFocusHandlers){
@@ -1193,7 +1226,7 @@ static void deinit(void) {
 
   app_focus_service_unsubscribe();
   tick_timer_service_unsubscribe();
-  
+
   connection_service_unsubscribe();
   window_destroy(s_window);
   app_message_deregister_callbacks();
